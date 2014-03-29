@@ -5,18 +5,7 @@
  *  Author: master
  */ 
 
-#define F_CPU 16000000
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <util/delay.h>
-#include "atmega32_uart.h"
-volatile unsigned int CurrentCaptureTime ;
-volatile unsigned int PreviousCaptureTime ;
-volatile unsigned int NewBitTime ;
-volatile unsigned char NewBitTimeFlag;
-
-
-#define POWER	16753245
+#define POWER	93
 #define MODE	16736925
 #define MUTE	16769565
 #define REWARD	16720605
@@ -27,16 +16,43 @@ volatile unsigned char NewBitTimeFlag;
 #define EQ		16748655
 #define HUNDRED	16750695
 #define	BACK	16756815
-#define ZERO	16738455
-#define ONE		16724175
-#define TWO		16718055
-#define THREE	16743045
-#define FOUR	16716015
-#define FIVE	16726215
-#define SIX		16734885
-#define SEVEN	16728765
-#define EIGHT	16730805
-#define NNE		16732845
+#define ZERO	151
+#define ONE		207
+#define TWO		231
+#define THREE	133
+#define FOUR	239
+#define FIVE	199
+#define SIX		165
+#define SEVEN	189
+#define EIGHT	181
+#define NINE	173
+#define NULL	0
+
+#define LOCKED				0
+#define UNLOCKED			1
+#define READY				2
+#define CORRECT				3
+#define INCORRECT			4
+#define EMPTYPASSWORD		5
+#define NEWPASSWORD			6
+#define PASSMAXLENGTH		10
+#define DEVICEADDRESS		255
+#define SYSTEMPASSWORD		"01234"
+		
+#define F_CPU 16000000UL
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+#include "atmega32_uart.h"
+volatile unsigned int CurrentCaptureTime ;
+volatile unsigned int PreviousCaptureTime ;
+volatile unsigned int NewBitTime ;
+volatile unsigned char NewBitTimeFlag;
+unsigned char SysStatus=LOCKED;
+unsigned char data[10];
+
+
+
 
 
 
@@ -63,7 +79,7 @@ void setUp(void)
 	
 }
 
-void getCode(unsigned int* NewBitTimeDuration,unsigned long* IrCommand, unsigned char* NewIrCommandFlag)
+void getCode(uint16_t* NewBitTimeDuration,unsigned long* IrCommandBuffer,uint8_t* Iraddress,uint8_t* IrCommand, uint8_t* NewIrCommandFlag)
 {
 	static unsigned char StartBit=32;
 	static unsigned char CurrentBitPosition=0;
@@ -73,7 +89,7 @@ void getCode(unsigned int* NewBitTimeDuration,unsigned long* IrCommand, unsigned
 		NewBitTime+=65536;
 		if ((*NewBitTimeDuration)<1) /* still negative >> garbage time */
 		{
-			IrCommand=0;
+			IrCommandBuffer=0;
 			CurrentBitPosition=0;
 			StartBit=0;
 			return;
@@ -84,16 +100,16 @@ void getCode(unsigned int* NewBitTimeDuration,unsigned long* IrCommand, unsigned
 	{
 		if ((*NewBitTimeDuration)>=60 && (*NewBitTimeDuration)<=80) /* Time of Zero bit */
 		{
-			*IrCommand&=~(1UL<<(--CurrentBitPosition));
+			*IrCommandBuffer&=~(1UL<<(--CurrentBitPosition));
 		}
 		else if ((*NewBitTimeDuration)>=130 && (*NewBitTimeDuration)<=150) /* Time of One bit */
 		{
-			*IrCommand|=(1UL<<(--CurrentBitPosition));
+			*IrCommandBuffer|=(1UL<<(--CurrentBitPosition));
 		}
 		else /*error IR bit time >> ignore the whole command and recieve new one*/
 		{
 			
-			*IrCommand=0;
+			*IrCommandBuffer=0;
 			CurrentBitPosition=32;
 			StartBit=0;
 			return;
@@ -104,14 +120,115 @@ void getCode(unsigned int* NewBitTimeDuration,unsigned long* IrCommand, unsigned
 	else if((*NewBitTimeDuration)>=800 && (*NewBitTimeDuration)<=900)
 	{
 		StartBit=1;
-		*IrCommand=0;
+		*IrCommandBuffer=0;
 	}
 	
 	if(CurrentBitPosition==0)
 	{
 		*NewIrCommandFlag=1;
+		*IrCommand=(char)(*IrCommandBuffer);
+		*Iraddress=(char)((*IrCommandBuffer)>>16);
 		CurrentBitPosition=32;
 		StartBit=0;
+	}
+	
+}
+
+void GetPassword(uint8_t* IrAddress,uint8_t* IrCommand,uint8_t* PasswordFlag,uint8_t* Password)
+{
+	static uint8_t PasswordIndex=0;
+	
+	if (*IrAddress==DEVICEADDRESS)
+	{
+		if (*IrCommand==POWER)
+		{
+			if (PasswordIndex<PASSMAXLENGTH)
+			{
+				Password[PasswordIndex]=0;
+			}
+			else
+			{
+				Password[PASSMAXLENGTH]=0;
+			}
+			
+			*PasswordFlag=NEWPASSWORD;
+			PasswordIndex=0;
+			USART_WRITE_STRING(Password);
+			
+		}
+		else if (PasswordIndex<PASSMAXLENGTH)
+		{
+			switch(*IrCommand)
+			{
+				case ZERO:
+				Password[PasswordIndex++]='0';
+				USART_WRITE_BYTE('0');
+				break;
+				case ONE:
+				Password[PasswordIndex++]='1';
+				USART_WRITE_BYTE('1');
+				break;
+				case TWO:
+				Password[PasswordIndex++]='2';
+				USART_WRITE_BYTE('2');
+				break;
+				case THREE:
+				Password[PasswordIndex++]='3';
+				USART_WRITE_BYTE('3');
+				break;
+				case FOUR:
+				Password[PasswordIndex++]='4';
+				USART_WRITE_BYTE('4');
+				break;
+				case FIVE:
+				Password[PasswordIndex++]='5';
+				USART_WRITE_BYTE('5');
+				break;
+				case SIX:
+				Password[PasswordIndex++]='6';
+				USART_WRITE_BYTE('6');
+				break;
+				case SEVEN:
+				Password[PasswordIndex++]='7';
+				USART_WRITE_BYTE('7');
+				break;
+				case EIGHT:
+				Password[PasswordIndex++]='8';
+				USART_WRITE_BYTE('8');
+				break;
+				case NINE:
+				Password[PasswordIndex++]='9';
+				USART_WRITE_BYTE('9');
+				break;
+				
+				
+			}
+			
+			
+			//Password[PasswordIndex++]=*IrCommand;
+			
+		}
+	
+	}	
+}
+
+void CheckPassword(uint8_t* Password,uint8_t* PasswordFlag)
+{
+	USART_WRITE_STRING("check");
+	if (*Password==NULL)
+	{
+		*PasswordFlag=EMPTYPASSWORD;
+		USART_WRITE_STRING("emptyyy");
+	}
+	else if(!strcmp(Password,SYSTEMPASSWORD))
+	{
+		*PasswordFlag=CORRECT;
+		USART_WRITE_STRING("correcttt");
+	}
+	else
+	{
+		*PasswordFlag=INCORRECT;
+		USART_WRITE_STRING("incorrecttt");
 	}
 	
 }
@@ -120,8 +237,13 @@ int main(void)
 {
 	setUp();
 	USART_WRITE_STRING("Starting : ");
-	unsigned long IrCMD=0;
-	unsigned char NewIrCmdFlag=0;
+	unsigned long Buffer=0;
+	uint8_t IrCmd=0;
+	uint8_t IrAddress=0;
+	uint8_t NewIrCmdFlag=0;
+	uint8_t ReceivedPassword[10]={0};
+	uint8_t ReceivedPasswordFlag=0;	
+	
 	
 	
 	
@@ -131,30 +253,51 @@ int main(void)
 		if (NewBitTimeFlag)
 		{
 			NewBitTimeFlag=0;
-			getCode(&NewBitTime,&IrCMD,&NewIrCmdFlag);
+			getCode(&NewBitTime,&Buffer,&IrAddress,&IrCmd,&NewIrCmdFlag);
 			if (NewIrCmdFlag==1)
 			{
 				NewIrCmdFlag=0;
-				/*ultoa(IrCMD,IRCMD,10);
-				USART_WRITE_STRING(IRCMD);
-				USART_WRITE_BYTE(13);*/
-				
-				switch (IrCMD)
+				if (SysStatus==LOCKED)
 				{
-				case POWER : 
-				USART_WRITE_STRING("POWER");
-					break;
-				case MODE :
-				USART_WRITE_STRING("MODE");
-					break;
-				case MUTE :
-				USART_WRITE_STRING("MUTE");
-					break;
-				case PLAY :
-				USART_WRITE_STRING("PLAY");
-					break;	
+					if (IrCmd==POWER)
+					{
+						SysStatus=READY;
+						USART_WRITE_STRING("ready");
+					}
+				} 
+				else if (SysStatus==READY)
+				{
+					GetPassword(&IrAddress,&IrCmd,&ReceivedPasswordFlag,ReceivedPassword);
+					if (ReceivedPasswordFlag==NEWPASSWORD)
+					{
+						CheckPassword(&ReceivedPassword,&ReceivedPasswordFlag);
+						if (ReceivedPasswordFlag==CORRECT) 
+						{
+							SysStatus=UNLOCKED;
+							USART_WRITE_STRING("correct");
+						}
+						else if (ReceivedPasswordFlag==INCORRECT)
+						{
+							USART_WRITE_STRING("incorrect");
+							// error message
+						}
+						else if (ReceivedPasswordFlag==EMPTYPASSWORD)
+						{
+							USART_WRITE_STRING("empty");
+							// empty password message
+						}
+					}
+					
+				
 				}
-				IrCMD=0;
+				
+				else if (SysStatus==UNLOCKED)
+				{
+					USART_WRITE_STRING("Unlocked");
+				}
+				
+				
+				IrCmd=0;
 			}
 		}
      
